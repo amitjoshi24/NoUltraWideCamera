@@ -48,10 +48,10 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     private var hasUltraWideCamera = false
     private var telephotoZoomFactor: CGFloat = 2.0 // Default, will be updated based on device
 
-    private let zoomFactorLabel = UILabel()
-    private var isBackCameraActive = true  // Default to back camera
+    private let wideAngleButton = UIButton()
+    private let telephotoButton = UIButton()
 
-    private var shouldSwitchToWide = false
+    private var isBackCameraActive = true  // Default to back camera
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -60,7 +60,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         setupCaptureSession()
         setupCaptureButton()
         setupThumbnailButton()
-        setupGesture()
+        setupCameraToggleButtons()
         setupUI()
     }
 
@@ -163,209 +163,86 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         }
     }
 
-    private func setupGesture() {
-        let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
-        previewView.addGestureRecognizer(pinchGesture)
-    }
-
-    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard let device = videoDeviceInput?.device else { return }
+    private func setupCameraToggleButtons() {
+        // 1x Button (Wide Angle)
+        wideAngleButton.translatesAutoresizingMaskIntoConstraints = false
+        wideAngleButton.setTitle("1x", for: .normal)
+        wideAngleButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        wideAngleButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        wideAngleButton.layer.cornerRadius = 25
+        wideAngleButton.addTarget(self, action: #selector(switchToWideAngle), for: .touchUpInside)
+        wideAngleButton.alpha = 1.0
+        view.addSubview(wideAngleButton)
         
-        if gesture.state == .began {
-            // Show zoom label when pinch begins
-            zoomFactorLabel.isHidden = false
-            // Reset switch flag on new gesture
-            shouldSwitchToWide = false
-        }
+        // Telephoto Button (2x, 3x, or 5x depending on the device)
+        telephotoButton.translatesAutoresizingMaskIntoConstraints = false
+        telephotoButton.setTitle("\(Int(telephotoZoomFactor))x", for: .normal)
+        telephotoButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        telephotoButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        telephotoButton.layer.cornerRadius = 25
+        telephotoButton.addTarget(self, action: #selector(switchToTelephoto), for: .touchUpInside)
+        telephotoButton.alpha = 0.4
+        telephotoButton.isHidden = !hasTelephotoCamera // Hide if no telephoto available
+        view.addSubview(telephotoButton)
         
-        if gesture.state == .changed {
-            do {
-                // Calculate raw zoom level (before enforcing minimum)
-                let rawTargetZoom = device.videoZoomFactor * gesture.scale
-                
-                // Check if we should switch back to wide BEFORE enforcing minimum
-                if isUsingTelephoto && rawTargetZoom < 1.0 {
-                    shouldSwitchToWide = true
-                }
-                
-                // Now enforce minimum zoom
-                var targetZoom = max(1.0, rawTargetZoom)
-                
-                // Debug info
-                print("Current zoom: \(device.videoZoomFactor), Target zoom: \(targetZoom), Raw: \(rawTargetZoom)")
-                
-                // Switch to telephoto if needed
-                if hasTelephotoCamera && !isUsingTelephoto && targetZoom >= telephotoZoomFactor {
-                    // Log before switch attempt
-                    print("Attempting to switch to telephoto")
-                    
-                    // Try to switch to telephoto camera
-                    let switchSuccessful = switchToCamera(type: .builtInTelephotoCamera)
-                    
-                    // Only update state if switch was successful
-                    if switchSuccessful {
-                        isUsingTelephoto = true
-                        isUsingUltraWide = false
-                        print("Switch to telephoto successful")
-                        
-                        // Reset to 1.0x when switching to telephoto
-                        if let device = videoDeviceInput?.device {
-                            try? device.lockForConfiguration()
-                            device.videoZoomFactor = 1.0
-                            device.unlockForConfiguration()
-                            
-                            // Update the zoom display to show telephoto zoom factor
-                            let zoomText = String(format: "%.1fx", telephotoZoomFactor)
-                            permanentZoomLabel.text = zoomText
-                            zoomFactorLabel.text = zoomText
-                        }
-                    } else {
-                        // If switch failed, continue with digital zoom on current camera
-                        print("Switch to telephoto failed, using digital zoom")
-                        try device.lockForConfiguration()
-                        let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 10.0) // Limit max digital zoom
-                        let limitedZoom = min(targetZoom, maxZoom)
-                        device.videoZoomFactor = limitedZoom
-                        
-                        let zoomText = String(format: "%.1fx", limitedZoom)
-                        permanentZoomLabel.text = zoomText
-                        zoomFactorLabel.text = zoomText
-                        
-                        device.unlockForConfiguration()
-                    }
-                }
-                // Switch back to wide if flag is set
-                else if isUsingTelephoto && shouldSwitchToWide {
-                    print("Attempting to switch back to wide (flag triggered)")
-                    
-                    let switchSuccessful = switchToCamera(type: .builtInWideAngleCamera)
-                    if switchSuccessful {
-                        isUsingTelephoto = false
-                        isUsingUltraWide = false
-                        shouldSwitchToWide = false  // Reset flag
-                        print("Switch to wide successful")
-                        
-                        // Set zoom to telephoto factor when switching back
-                        if let device = videoDeviceInput?.device {
-                            try? device.lockForConfiguration()
-                            device.videoZoomFactor = telephotoZoomFactor
-                            device.unlockForConfiguration()
-                            
-                            // Update zoom display
-                            let zoomText = String(format: "%.1fx", telephotoZoomFactor)
-                            permanentZoomLabel.text = zoomText
-                            zoomFactorLabel.text = zoomText
-                        }
-                    }
-                }
-                else {
-                    // Apply zoom to the current camera
-                    try device.lockForConfiguration()
-                    let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 10.0)
-                    let limitedZoom = min(targetZoom, maxZoom)
-                    device.videoZoomFactor = limitedZoom
-                    
-                    // Update zoom display
-                    let displayZoom: CGFloat
-                    if isUsingTelephoto {
-                        displayZoom = limitedZoom * telephotoZoomFactor
-                    } else if isUsingUltraWide {
-                        displayZoom = limitedZoom * 0.5
-                    } else {
-                        displayZoom = limitedZoom
-                    }
-                    
-                    let zoomText = String(format: "%.1fx", displayZoom)
-                    zoomFactorLabel.text = zoomText
-                    permanentZoomLabel.text = zoomText
-                    
-                    device.unlockForConfiguration()
-                }
-                
-                // Reset scale for continuous pinching
-                gesture.scale = 1.0
-                
-            } catch {
-                print("Error during zoom: \(error)")
-            }
-        } else if gesture.state == .ended {
-            // Reset flag when gesture ends
-            shouldSwitchToWide = false
+        // Layout
+        NSLayoutConstraint.activate([
+            wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -30),
+            wideAngleButton.trailingAnchor.constraint(equalTo: view.centerXAnchor, constant: -15),
+            wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
+            wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
             
-            // Hide temporary zoom label after a delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.zoomFactorLabel.isHidden = true
+            telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -30),
+            telephotoButton.leadingAnchor.constraint(equalTo: view.centerXAnchor, constant: 15),
+            telephotoButton.widthAnchor.constraint(equalToConstant: 50),
+            telephotoButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+
+    @objc private func switchToWideAngle() {
+        if !isUsingTelephoto { return } // Already using wide angle
+        
+        let switchSuccessful = switchToCamera(type: .builtInWideAngleCamera)
+        if switchSuccessful {
+            isUsingTelephoto = false
+            isUsingUltraWide = false
+            
+            // Fix: Button appearance - 1x should be highlighted, telephoto dimmed
+            wideAngleButton.alpha = 1.0
+            telephotoButton.alpha = 0.4
+            
+            // Reset zoom
+            if let device = videoDeviceInput?.device {
+                try? device.lockForConfiguration()
+                device.videoZoomFactor = 1.0
+                device.unlockForConfiguration()
             }
+            
+            permanentZoomLabel.text = "1.0x"
         }
     }
 
-    private func switchToCamera(type: AVCaptureDevice.DeviceType) -> Bool {
-        guard let session = captureSession,
-              let newDevice = AVCaptureDevice.default(type, for: .video, position: .back) else {
-            print("Could not find camera device of type: \(type)")
-            return false
-        }
+    @objc private func switchToTelephoto() {
+        if isUsingTelephoto || !hasTelephotoCamera { return } // Already using telephoto or not available
         
-        var success = false
-        
-        session.beginConfiguration()
-        
-        // Remove existing camera input
-        if let currentInput = videoDeviceInput {
-            session.removeInput(currentInput)
-        }
-        
-        // Add new camera input
-        do {
-            let newInput = try AVCaptureDeviceInput(device: newDevice)
-            if session.canAddInput(newInput) {
-                session.addInput(newInput)
-                videoDeviceInput = newInput
-                success = true
-                
-                // Update zoom level display
-                let displayZoom: CGFloat
-                switch type {
-                case .builtInTelephotoCamera:
-                    displayZoom = telephotoZoomFactor
-                    isUsingTelephoto = true
-                    isUsingUltraWide = false
-                case .builtInUltraWideCamera:
-                    displayZoom = 0.5
-                    isUsingTelephoto = false
-                    isUsingUltraWide = true
-                default: // Wide angle
-                    displayZoom = 1.0
-                    isUsingTelephoto = false
-                    isUsingUltraWide = false
-                }
-                
-                // Update label with actual camera zoom factor
-                DispatchQueue.main.async {
-                    self.permanentZoomLabel.text = String(format: "%.1fx", displayZoom)
-                    self.zoomFactorLabel.text = String(format: "%.1fx", displayZoom)
-                }
-            } else {
-                print("Camera session could not add input for device type: \(type)")
-                // If we failed to add the new input, try to restore the old one
-                if let oldInput = videoDeviceInput {
-                    if session.canAddInput(oldInput) {
-                        session.addInput(oldInput)
-                    }
-                }
+        let switchSuccessful = switchToCamera(type: .builtInTelephotoCamera)
+        if switchSuccessful {
+            isUsingTelephoto = true
+            isUsingUltraWide = false
+            
+            // Fix: Button appearance - telephoto should be highlighted, 1x dimmed
+            wideAngleButton.alpha = 0.4
+            telephotoButton.alpha = 1.0
+            
+            // Reset zoom on telephoto
+            if let device = videoDeviceInput?.device {
+                try? device.lockForConfiguration()
+                device.videoZoomFactor = 1.0
+                device.unlockForConfiguration()
             }
-        } catch {
-            print("Error creating camera input: \(error)")
-            // Try to restore the old input
-            if let oldInput = videoDeviceInput {
-                if session.canAddInput(oldInput) {
-                    session.addInput(oldInput)
-                }
-            }
+            
+            permanentZoomLabel.text = String(format: "%.1fx", telephotoZoomFactor)
         }
-        
-        session.commitConfiguration()
-        return success
     }
 
     @objc private func capturePhoto() {
@@ -492,29 +369,11 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         view.addSubview(permanentZoomLabel)
 
         NSLayoutConstraint.activate([
-            permanentZoomLabel.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-            permanentZoomLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            // Move label to the right of the capture button
+            permanentZoomLabel.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+            permanentZoomLabel.leadingAnchor.constraint(equalTo: captureButton.trailingAnchor, constant: 20),
             permanentZoomLabel.widthAnchor.constraint(equalToConstant: 60),
             permanentZoomLabel.heightAnchor.constraint(equalToConstant: 25)
-        ])
-
-        // Setup temporary zoom factor label (appears only during zoom gesture)
-        zoomFactorLabel.translatesAutoresizingMaskIntoConstraints = false
-        zoomFactorLabel.text = "1.0x"
-        zoomFactorLabel.textColor = .white
-        zoomFactorLabel.font = UIFont.systemFont(ofSize: 18, weight: .medium)
-        zoomFactorLabel.textAlignment = .center
-        zoomFactorLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        zoomFactorLabel.layer.cornerRadius = 10
-        zoomFactorLabel.clipsToBounds = true
-        zoomFactorLabel.isHidden = true  // Hidden by default, only shows during zoom
-        view.addSubview(zoomFactorLabel)
-
-        NSLayoutConstraint.activate([
-            zoomFactorLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            zoomFactorLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            zoomFactorLabel.widthAnchor.constraint(equalToConstant: 80),
-            zoomFactorLabel.heightAnchor.constraint(equalToConstant: 40)
         ])
     }
 
@@ -610,7 +469,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 
                 DispatchQueue.main.async {
                     self.permanentZoomLabel.text = "1.0x"
-                    self.zoomFactorLabel.text = "1.0x"
                 }
             }
         } catch {
@@ -618,5 +476,73 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         }
         
         session.commitConfiguration()
+    }
+
+    private func switchToCamera(type: AVCaptureDevice.DeviceType) -> Bool {
+        guard let session = captureSession,
+              let newDevice = AVCaptureDevice.default(type, for: .video, position: .back) else {
+            print("Could not find camera device of type: \(type)")
+            return false
+        }
+        
+        var success = false
+        
+        session.beginConfiguration()
+        
+        // Remove existing camera input
+        if let currentInput = videoDeviceInput {
+            session.removeInput(currentInput)
+        }
+        
+        // Add new camera input
+        do {
+            let newInput = try AVCaptureDeviceInput(device: newDevice)
+            if session.canAddInput(newInput) {
+                session.addInput(newInput)
+                videoDeviceInput = newInput
+                success = true
+                
+                // Update zoom level display
+                let displayZoom: CGFloat
+                switch type {
+                case .builtInTelephotoCamera:
+                    displayZoom = telephotoZoomFactor
+                    isUsingTelephoto = true
+                    isUsingUltraWide = false
+                case .builtInUltraWideCamera:
+                    displayZoom = 0.5
+                    isUsingTelephoto = false
+                    isUsingUltraWide = true
+                default: // Wide angle
+                    displayZoom = 1.0
+                    isUsingTelephoto = false
+                    isUsingUltraWide = false
+                }
+                
+                // Update label with actual camera zoom factor
+                DispatchQueue.main.async {
+                    self.permanentZoomLabel.text = String(format: "%.1fx", displayZoom)
+                }
+            } else {
+                print("Camera session could not add input for device type: \(type)")
+                // If we failed to add the new input, try to restore the old one
+                if let oldInput = videoDeviceInput {
+                    if session.canAddInput(oldInput) {
+                        session.addInput(oldInput)
+                    }
+                }
+            }
+        } catch {
+            print("Error creating camera input: \(error)")
+            // Try to restore the old input
+            if let oldInput = videoDeviceInput {
+                if session.canAddInput(oldInput) {
+                    session.addInput(oldInput)
+                }
+            }
+        }
+        
+        session.commitConfiguration()
+        return success
     }
 }
