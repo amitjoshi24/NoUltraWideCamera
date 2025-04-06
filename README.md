@@ -37,9 +37,12 @@ Perfect for anyone tired of getting blurry, distorted ultra-wide lens shots from
 
 ## 🙌 Credits
 
-Made with ❤️ by **Amit Joshi**
-**github.com/amitjoshi24**
-Inspired by a very specific and relatable pain 😅
+Made with ❤️ by  
+**Amit Joshi**  
+[github.com/amitjoshi24](https://github.com/amitjoshi24)  
+
+Inspired by a very specific and perhaps relatable pain 😅
+
 
 ---
 
