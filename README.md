@@ -16,7 +16,7 @@ I actually love the ultra-wide camera for landscape pictures, but when it comes 
 - 📸 Clean, native-style interface
 - 🤳 Tap to focus, automatically adjusts focus and lighting (exposure)
 - 🗂 Choose photo file format (HEIC, JPEG, PNG.)
-- 🌞💡 Manually adjust exposure (brightness control), and lock 
+- 🌞💡 Manually adjust exposure (brightness control), and lock 🔒
 - 🔍 Tap pre-set levels to zoom (min 1.0x), and uses the telephoto lens for optical zoom.
 - 🖼 Instant photo previews with camera roll access
 - ⚡️ Haptic feedback + shutter flash animation
