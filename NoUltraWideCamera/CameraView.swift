@@ -53,6 +53,8 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
     private var isBackCameraActive = true  // Default to back camera
 
+    private let focusIndicator = UIView()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         checkAvailableCameras()
@@ -61,6 +63,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         setupCaptureButton()
         setupThumbnailButton()
         setupCameraToggleButtons()
+        setupTapGestureForFocus()
         setupUI()
     }
 
@@ -544,5 +547,65 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         
         session.commitConfiguration()
         return success
+    }
+
+    private func setupTapGestureForFocus() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapToFocus(_:)))
+        previewView.addGestureRecognizer(tapGesture)
+        
+        // Setup focus indicator view
+        focusIndicator.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+        focusIndicator.layer.borderColor = UIColor.yellow.cgColor
+        focusIndicator.layer.borderWidth = 2
+        focusIndicator.backgroundColor = UIColor.clear
+        focusIndicator.isHidden = true
+        view.addSubview(focusIndicator)
+    }
+
+    @objc private func handleTapToFocus(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: previewView)
+        
+        guard let device = videoDeviceInput?.device,
+              let previewLayer = previewLayer else { return }
+        
+        // Convert tap point to camera coordinates
+        let pointInCamera = previewLayer.captureDevicePointConverted(fromLayerPoint: location)
+        
+        do {
+            try device.lockForConfiguration()
+            
+            // Check if device supports focus point of interest
+            if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
+                device.focusPointOfInterest = pointInCamera
+                device.focusMode = .autoFocus
+            }
+            
+            // Also set exposure point if supported
+            if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.autoExpose) {
+                device.exposurePointOfInterest = pointInCamera
+                device.exposureMode = .autoExpose
+            }
+            
+            device.unlockForConfiguration()
+            
+            // Show and animate focus indicator
+            focusIndicator.center = location
+            focusIndicator.isHidden = false
+            focusIndicator.alpha = 1
+            focusIndicator.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+            
+            UIView.animate(withDuration: 0.3, animations: {
+                self.focusIndicator.transform = CGAffineTransform.identity
+            }) { _ in
+                UIView.animate(withDuration: 0.5, delay: 0.5, options: [], animations: {
+                    self.focusIndicator.alpha = 0
+                }) { _ in
+                    self.focusIndicator.isHidden = true
+                }
+            }
+            
+        } catch {
+            print("Could not set focus point: \(error)")
+        }
     }
 }
