@@ -83,13 +83,67 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
     private func setupPreview() {
+        // Create a specific container for the black bars
+        let topBlackView = UIView()
+        topBlackView.translatesAutoresizingMaskIntoConstraints = false
+        topBlackView.backgroundColor = .black
+        view.addSubview(topBlackView)
+        
+        let bottomBlackView = UIView()
+        bottomBlackView.translatesAutoresizingMaskIntoConstraints = false
+        bottomBlackView.backgroundColor = .black
+        view.addSubview(bottomBlackView)
+        
+        // Add the preview view
         previewView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(previewView)
+        
+        // Create specific constraints to position everything
+        let topBarHeight: CGFloat = UIScreen.main.bounds.height * 0.07  // 7% for top bar
+        let bottomBarHeight: CGFloat = UIScreen.main.bounds.height * 0.2 // 20% for bottom bar
+        
         NSLayoutConstraint.activate([
-            previewView.topAnchor.constraint(equalTo: view.topAnchor),
-            previewView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // Top black bar
+            topBlackView.topAnchor.constraint(equalTo: view.topAnchor),
+            topBlackView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topBlackView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topBlackView.heightAnchor.constraint(equalToConstant: topBarHeight),
+            
+            // Bottom black bar
+            bottomBlackView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomBlackView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBlackView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBlackView.heightAnchor.constraint(equalToConstant: bottomBarHeight),
+            
+            // Preview view - constrained between the black bars
+            previewView.topAnchor.constraint(equalTo: topBlackView.bottomAnchor),
+            previewView.bottomAnchor.constraint(equalTo: bottomBlackView.topAnchor),
             previewView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             previewView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // Add the aspect ratio label to the top black bar
+        addAspectRatioLabel(inView: topBlackView)
+    }
+
+    private func addAspectRatioLabel(inView containerView: UIView) {
+        let label = UILabel()
+        label.tag = 101
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "3:4"
+        label.textColor = UIColor.white.withAlphaComponent(0.7)
+        label.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        label.textAlignment = .center
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        label.layer.cornerRadius = 4
+        label.clipsToBounds = true
+        containerView.addSubview(label)
+        
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.topAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -10),
+            label.widthAnchor.constraint(equalToConstant: 40),
+            label.heightAnchor.constraint(equalToConstant: 22)
         ])
     }
 
@@ -117,9 +171,11 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
         captureSession.commitConfiguration()
 
+        // Create the preview layer with proper aspect ratio settings
         previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
-        previewLayer?.videoGravity = .resizeAspectFill
+        previewLayer?.videoGravity = .resizeAspect // Use aspect to maintain true 3:4 ratio
         previewView.layer.addSublayer(previewLayer!)
+        previewView.backgroundColor = .black
     }
 
     private func setupCaptureButton() {
@@ -188,15 +244,15 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         telephotoButton.isHidden = !hasTelephotoCamera // Hide if no telephoto available
         view.addSubview(telephotoButton)
         
-        // Layout
+        // Layout - Position above the shutter button
         NSLayoutConstraint.activate([
-            wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -30),
-            wideAngleButton.trailingAnchor.constraint(equalTo: view.centerXAnchor, constant: -15),
+            wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+            wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -15),
             wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
             wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
             
-            telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -30),
-            telephotoButton.leadingAnchor.constraint(equalTo: view.centerXAnchor, constant: 15),
+            telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+            telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 15),
             telephotoButton.widthAnchor.constraint(equalToConstant: 50),
             telephotoButton.heightAnchor.constraint(equalToConstant: 50)
         ])
@@ -363,20 +419,18 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
         permanentZoomLabel.translatesAutoresizingMaskIntoConstraints = false
         permanentZoomLabel.text = "1.0x"
-        permanentZoomLabel.textColor = .white
-        permanentZoomLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        permanentZoomLabel.textColor = .black
+        permanentZoomLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         permanentZoomLabel.textAlignment = .center
-        permanentZoomLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        permanentZoomLabel.layer.cornerRadius = 8
-        permanentZoomLabel.clipsToBounds = true
+        permanentZoomLabel.backgroundColor = UIColor.clear
         view.addSubview(permanentZoomLabel)
 
         NSLayoutConstraint.activate([
-            // Move label to the right of the capture button
+            // Move label to inside the capture button
+            permanentZoomLabel.centerXAnchor.constraint(equalTo: captureButton.centerXAnchor),
             permanentZoomLabel.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
-            permanentZoomLabel.leadingAnchor.constraint(equalTo: captureButton.trailingAnchor, constant: 20),
-            permanentZoomLabel.widthAnchor.constraint(equalToConstant: 60),
-            permanentZoomLabel.heightAnchor.constraint(equalToConstant: 25)
+            permanentZoomLabel.widthAnchor.constraint(equalToConstant: 40),
+            permanentZoomLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
 
@@ -563,24 +617,37 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
     @objc private func handleTapToFocus(_ gesture: UITapGestureRecognizer) {
-        let location = gesture.location(in: previewView)
+        // Get tap location in the previewView
+        let locationInPreviewView = gesture.location(in: previewView)
         
         guard let device = videoDeviceInput?.device,
               let previewLayer = previewLayer else { return }
         
+        // Only proceed if the tap is within the actual visible camera feed
+        if !previewLayer.frame.contains(locationInPreviewView) {
+            print("Tap outside of camera feed area - ignoring")
+            return
+        }
+        
         // Convert tap point to camera coordinates
-        let pointInCamera = previewLayer.captureDevicePointConverted(fromLayerPoint: location)
+        let pointInCamera = previewLayer.captureDevicePointConverted(fromLayerPoint: locationInPreviewView)
+        
+        // Ensure the converted point is valid
+        if pointInCamera.x < 0 || pointInCamera.x > 1 || pointInCamera.y < 0 || pointInCamera.y > 1 {
+            print("Converted point outside valid range: \(pointInCamera)")
+            return
+        }
         
         do {
             try device.lockForConfiguration()
             
-            // Check if device supports focus point of interest
+            // Set focus point
             if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
                 device.focusPointOfInterest = pointInCamera
                 device.focusMode = .autoFocus
             }
             
-            // Also set exposure point if supported
+            // Set exposure point
             if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.autoExpose) {
                 device.exposurePointOfInterest = pointInCamera
                 device.exposureMode = .autoExpose
@@ -588,8 +655,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             
             device.unlockForConfiguration()
             
-            // Show and animate focus indicator
-            focusIndicator.center = location
+            // IMPORTANT: Convert preview view coordinates to main view coordinates
+            // This is the key fix - the focus indicator is in the main view, not the preview view
+            let locationInMainView = previewView.convert(locationInPreviewView, to: view)
+            
+            // Position indicator at the converted coordinates in the main view
+            focusIndicator.center = locationInMainView
             focusIndicator.isHidden = false
             focusIndicator.alpha = 1
             focusIndicator.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
