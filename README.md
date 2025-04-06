@@ -1,4 +1,4 @@
-# NoUltraWideCamera 📸 0.5 🚫
+# NoUltraWideCamera 📸
 
 NoUltraWideCamera is a minimalist iOS camera app that **prevents the use of the ultra-wide (0.5x) lens**. This is pretty much only useful when handing your phone to strangers to take a photo of you — ensuring **higher quality images** without worrying they'll accidentally switch to the low-res 0.5x lens. 
 
