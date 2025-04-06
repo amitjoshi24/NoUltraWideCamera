@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import Photos
+import CoreLocation
 
 // SwiftUI wrapper
 struct CameraView: UIViewControllerRepresentable {
@@ -55,8 +56,66 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
     private let focusIndicator = UIView()
 
+    // Add a new button property
+    private let twoXButton = UIButton()
+    private var has2xOpticalQualityZoom = false
+
+    // Add these properties to the class
+    private let flashButton = UIButton()
+    private var isFlashOn = false
+
+    // Add these new properties to the class
+    private let formatButton = UIButton()
+    private var currentFormat: PhotoFormat = .heic
+    private var exposureSlider = UISlider()
+    private var exposureView = UIView()
+    private let locationManager = CLLocationManager()
+    private var currentLocation: CLLocation?
+
+    // Add these properties to the class
+    private let advancedSettingsButton = UIButton()
+    private let settingsPanel = UIView()
+    private let formatLabel = UILabel()
+    private var isSettingsPanelVisible = false
+
+    // Add this enum for photo formats
+    private enum PhotoFormat: String, CaseIterable {
+        case heic = "HEIC"
+        case jpeg = "JPEG"
+        case png = "PNG"
+        
+        var fileExtension: String {
+            switch self {
+            case .heic: return "heic"
+            case .jpeg: return "jpeg"
+            case .png: return "png"
+            }
+        }
+        
+        var mimeType: String {
+            switch self {
+            case .heic: return "image/heic"
+            case .jpeg: return "image/jpeg"
+            case .png: return "image/png"
+            }
+        }
+    }
+
+    // Add this new property to the class
+    private var currentEVLabel: UILabel?
+
+    // Add this property
+    private let formatIndicatorLabel = UILabel()
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        // Add this line to suppress Metal framework warnings in simulator
+        if ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != nil {
+            print("Running in Simulator - some camera features disabled")
+            return
+        }
+        
         checkAvailableCameras()
         setupPreview()
         setupCaptureSession()
@@ -64,7 +123,14 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         setupThumbnailButton()
         setupCameraToggleButtons()
         setupTapGestureForFocus()
+        setupTopControlButtons()
+        setupAdvancedSettings()
+        setupExposureControl()
+        setupLocationServices()
         setupUI()
+        
+        // Lock orientation to portrait
+        AppDelegate.orientationLock = .portrait
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -233,6 +299,18 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         wideAngleButton.alpha = 1.0
         view.addSubview(wideAngleButton)
         
+        // 2x Button (Optical-quality from main sensor)
+        if has2xOpticalQualityZoom && telephotoZoomFactor > 2.0 {
+            twoXButton.translatesAutoresizingMaskIntoConstraints = false
+            twoXButton.setTitle("2x", for: .normal)
+            twoXButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+            twoXButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            twoXButton.layer.cornerRadius = 25
+            twoXButton.addTarget(self, action: #selector(switchToTwoX), for: .touchUpInside)
+            twoXButton.alpha = 0.4
+            view.addSubview(twoXButton)
+        }
+        
         // Telephoto Button (2x, 3x, or 5x depending on the device)
         telephotoButton.translatesAutoresizingMaskIntoConstraints = false
         telephotoButton.setTitle("\(Int(telephotoZoomFactor))x", for: .normal)
@@ -244,41 +322,67 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         telephotoButton.isHidden = !hasTelephotoCamera // Hide if no telephoto available
         view.addSubview(telephotoButton)
         
-        // Layout - Position above the shutter button
-        NSLayoutConstraint.activate([
-            wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-            wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -15),
-            wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
-            wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
-            
-            telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-            telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 15),
-            telephotoButton.widthAnchor.constraint(equalToConstant: 50),
-            telephotoButton.heightAnchor.constraint(equalToConstant: 50)
-        ])
+        // Layout - Position the buttons in a row
+        if has2xOpticalQualityZoom && telephotoZoomFactor > 2.0 {
+            NSLayoutConstraint.activate([
+                wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+                wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -40),
+                wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
+                wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
+                
+                twoXButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+                twoXButton.centerXAnchor.constraint(equalTo: captureButton.centerXAnchor),
+                twoXButton.widthAnchor.constraint(equalToConstant: 50),
+                twoXButton.heightAnchor.constraint(equalToConstant: 50),
+                
+                telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+                telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 40),
+                telephotoButton.widthAnchor.constraint(equalToConstant: 50),
+                telephotoButton.heightAnchor.constraint(equalToConstant: 50)
+            ])
+        } else {
+            // Keep existing layout for devices without 2x button
+            NSLayoutConstraint.activate([
+                wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+                wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -15),
+                wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
+                wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
+                
+                telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+                telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 15),
+                telephotoButton.widthAnchor.constraint(equalToConstant: 50),
+                telephotoButton.heightAnchor.constraint(equalToConstant: 50)
+            ])
+        }
     }
 
     @objc private func switchToWideAngle() {
-        if !isUsingTelephoto { return } // Already using wide angle
-        
-        let switchSuccessful = switchToCamera(type: .builtInWideAngleCamera)
-        if switchSuccessful {
-            isUsingTelephoto = false
-            isUsingUltraWide = false
-            
-            // Fix: Button appearance - 1x should be highlighted, telephoto dimmed
-            wideAngleButton.alpha = 1.0
-            telephotoButton.alpha = 0.4
-            
-            // Reset zoom
-            if let device = videoDeviceInput?.device {
-                try? device.lockForConfiguration()
-                device.videoZoomFactor = 1.0
-                device.unlockForConfiguration()
-            }
-            
-            permanentZoomLabel.text = "1.0x"
+        if !isUsingTelephoto && videoDeviceInput?.device.videoZoomFactor == 1.0 {
+            return // Already at 1x on wide angle
         }
+        
+        if isUsingTelephoto {
+            // Switch to wide angle camera
+            let switchSuccessful = switchToCamera(type: .builtInWideAngleCamera)
+            if !switchSuccessful { return }
+        }
+        
+        // Ensure zoom is set to 1.0x
+        if let device = videoDeviceInput?.device {
+            try? device.lockForConfiguration()
+            device.videoZoomFactor = 1.0
+            device.unlockForConfiguration()
+        }
+        
+        // Update UI
+        isUsingTelephoto = false
+        isUsingUltraWide = false
+        wideAngleButton.alpha = 1.0
+        if has2xOpticalQualityZoom {
+            twoXButton.alpha = 0.4
+        }
+        telephotoButton.alpha = 0.4
+        permanentZoomLabel.text = "1.0x"
     }
 
     @objc private func switchToTelephoto() {
@@ -304,13 +408,116 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         }
     }
 
+    @objc private func switchToTwoX() {
+        // First ensure we're using the wide angle camera
+        if isUsingTelephoto {
+            switchToCamera(type: .builtInWideAngleCamera)
+        }
+        
+        // Apply 2x zoom on the wide angle camera
+        if let device = videoDeviceInput?.device {
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = 2.0
+                device.unlockForConfiguration()
+                
+                // Update UI
+                permanentZoomLabel.text = "2.0x"
+                wideAngleButton.alpha = 0.4
+                twoXButton.alpha = 1.0
+                telephotoButton.alpha = 0.4
+                
+                isUsingTelephoto = false
+                isUsingUltraWide = false
+            } catch {
+                print("Could not set 2x zoom: \(error)")
+            }
+        }
+    }
+
     @objc private func capturePhoto() {
         guard let output = photoOutput, !isCapturing else { return }
         isCapturing = true
-        let settings = AVCapturePhotoSettings()
-        output.capturePhoto(with: settings, delegate: self)
-        triggerHaptic()
-        performShutterEffect()
+        
+        do {
+            // Configure photo settings based on selected format
+            let settings: AVCapturePhotoSettings
+            
+            switch currentFormat {
+            case .heic:
+                if let availableFormats = output.availablePhotoCodecTypes as? [AVVideoCodecType],
+                   availableFormats.contains(.hevc) {
+                    settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+                } else {
+                    // Fall back to JPEG if HEIC not available
+                    settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+                }
+                
+            case .jpeg:
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+                
+            case .png:
+                // For PNG, we'll capture in JPEG format and convert after
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            }
+            
+            // Add location metadata if available - using the proper metadata approach
+            if let location = currentLocation {
+                // Create metadata dictionary if needed
+                var metadata = settings.metadata
+                if metadata == nil {
+                    metadata = [:]
+                }
+                
+                // Create GPS metadata dictionary
+                let gpsDictionary = [
+                    kCGImagePropertyGPSLatitude as String: abs(location.coordinate.latitude),
+                    kCGImagePropertyGPSLatitudeRef as String: location.coordinate.latitude >= 0 ? "N" : "S",
+                    kCGImagePropertyGPSLongitude as String: abs(location.coordinate.longitude),
+                    kCGImagePropertyGPSLongitudeRef as String: location.coordinate.longitude >= 0 ? "E" : "W",
+                    kCGImagePropertyGPSAltitude as String: location.altitude,
+                    kCGImagePropertyGPSTimeStamp as String: Date(),
+                    kCGImagePropertyGPSSpeed as String: location.speed,
+                    kCGImagePropertyGPSSpeedRef as String: "K", // Kilometers per hour
+                    kCGImagePropertyGPSDateStamp as String: Date()
+                ] as [String : Any]
+                
+                // Add GPS dictionary to Exif metadata
+                var exifDictionary: [String: Any] = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+                metadata[kCGImagePropertyGPSDictionary as String] = gpsDictionary
+                metadata[kCGImagePropertyExifDictionary as String] = exifDictionary
+                
+                // Set the updated metadata
+                settings.metadata = metadata
+            }
+            
+            // Set flash mode based on user selection
+            if isFlashOn {
+                if let device = videoDeviceInput?.device, device.hasTorch {
+                    try device.lockForConfiguration()
+                    if device.isTorchModeSupported(.on) {
+                        device.torchMode = .on
+                    }
+                    device.unlockForConfiguration()
+                }
+                settings.flashMode = .on
+            } else {
+                if let device = videoDeviceInput?.device, device.hasTorch && device.torchMode == .on {
+                    try device.lockForConfiguration()
+                    device.torchMode = .off
+                    device.unlockForConfiguration()
+                }
+                settings.flashMode = .off
+            }
+            
+            // Take the photo with our settings
+            output.capturePhoto(with: settings, delegate: self)
+            triggerHaptic()
+            performShutterEffect()
+        } catch {
+            print("Error during photo capture: \(error.localizedDescription)")
+            isCapturing = false
+        }
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
@@ -321,15 +528,18 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             return
         }
         
-        // Use the photo directly rather than converting to UIImage first
-        // This preserves all the metadata
-        if let data = photo.fileDataRepresentation() {
+        var imageData = photo.fileDataRepresentation()
+        
+        // Handle PNG conversion if needed
+        if currentFormat == .png, let jpegData = imageData, let image = UIImage(data: jpegData) {
+            imageData = image.pngData()  // Convert to PNG
+        }
+        
+        if let data = imageData {
             PHPhotoLibrary.requestAuthorization { status in
                 if status == .authorized {
                     PHPhotoLibrary.shared().performChanges({
-                        // Create a request to add the photo to the library
                         let creationRequest = PHAssetCreationRequest.forAsset()
-                        // Add full photo data with metadata preserved
                         creationRequest.addResource(with: .photo, data: data, options: nil)
                     }, completionHandler: { success, error in
                         if let error = error {
@@ -366,18 +576,43 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
     private func updateThumbnailImage() {
+        // Fetch the most recent photo from the photo library with proper error handling
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.fetchLimit = 1
-
-        let assets = PHAsset.fetchAssets(with: .image, options: fetchOptions)
-        guard let asset = assets.firstObject else { return }
-
-        let manager = PHImageManager.default()
-        let size = CGSize(width: 50, height: 50)
-        manager.requestImage(for: asset, targetSize: size, contentMode: .aspectFill, options: nil) { image, _ in
-            if let image = image {
-                self.thumbnailButton.setImage(image, for: .normal)
+        
+        PHPhotoLibrary.requestAuthorization { [weak self] status in
+            guard let self = self, status == .authorized else { return }
+            
+            DispatchQueue.main.async {
+                let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+                
+                guard let asset = fetchResult.firstObject else {
+                    // No photos available - use a placeholder
+                    let placeholderImage = UIImage(systemName: "photo")
+                    self.thumbnailButton.setImage(placeholderImage, for: .normal)
+                    self.thumbnailButton.tintColor = .white
+                    return
+                }
+                
+                // Use a smaller image size to avoid performance issues
+                let manager = PHImageManager.default()
+                let targetSize = CGSize(width: 100, height: 100) // 2x larger than display size for retina
+                let options = PHImageRequestOptions()
+                options.deliveryMode = .opportunistic
+                options.isNetworkAccessAllowed = false // Don't try to download from iCloud
+                options.isSynchronous = false
+                
+                manager.requestImage(for: asset,
+                                     targetSize: targetSize,
+                                     contentMode: .aspectFill,
+                                     options: options) { [weak self] image, info in
+                    guard let image = image, let self = self else { return }
+                    
+                    DispatchQueue.main.async {
+                        self.thumbnailButton.setImage(image, for: .normal)
+                    }
+                }
             }
         }
     }
@@ -487,8 +722,25 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             }
         }
         
+        // Add detection for 2x optical-quality zoom capability
+        // iPhone 14 Pro/Pro Max and 15 Pro/Pro Max have this capability with their 48MP sensors
+        let device = UIDevice.current
+        let modelName = device.model
+        let systemVersion = Float(UIDevice.current.systemVersion) ?? 0
+        
+        // Simple detection based on model identifier and system version
+        if modelName.contains("iPhone") && systemVersion >= 16.0 {
+            // Check if this is likely a Pro model with 48MP sensor (14 Pro or newer)
+            if ProcessInfo.processInfo.physicalMemory > 6 * 1024 * 1024 * 1024 { // > 6GB RAM
+                // Likely a Pro model with 48MP camera
+                has2xOpticalQualityZoom = true
+                print("Device likely has 2x optical-quality zoom capability")
+            }
+        }
+        
         print("Available cameras: \(availableCameraTypes)")
         print("Telephoto zoom factor: \(telephotoZoomFactor)")
+        print("Has 2x optical-quality zoom: \(has2xOpticalQualityZoom)")
     }
 
     @objc private func flipCamera() {
@@ -605,6 +857,9 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
     private func setupTapGestureForFocus() {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapToFocus(_:)))
+        tapGesture.delaysTouchesBegan = false
+        tapGesture.delaysTouchesEnded = false
+        tapGesture.cancelsTouchesInView = false // Very important to prevent gesture gate timeouts
         previewView.addGestureRecognizer(tapGesture)
         
         // Setup focus indicator view
@@ -641,25 +896,33 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         do {
             try device.lockForConfiguration()
             
-            // Set focus point
+            // First reset any previous exposure compensation
+            device.setExposureTargetBias(0.0)
+            // Update EV label with current value
+            currentEVLabel?.text = String(format: "EV: %.1f", 0.0)
+            
+            // Set focus and exposure point
             if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
                 device.focusPointOfInterest = pointInCamera
                 device.focusMode = .autoFocus
             }
             
-            // Set exposure point
-            if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.autoExpose) {
+            if device.isExposurePointOfInterestSupported {
                 device.exposurePointOfInterest = pointInCamera
-                device.exposureMode = .autoExpose
+                
+                // Use continuous auto exposure to allow the camera to adjust
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                
+                // Reset the exposure compensation slider to zero
+                self.exposureSlider.setValue(0.0, animated: true)
             }
             
             device.unlockForConfiguration()
             
-            // IMPORTANT: Convert preview view coordinates to main view coordinates
-            // This is the key fix - the focus indicator is in the main view, not the preview view
+            // Show and animate focus indicator
             let locationInMainView = previewView.convert(locationInPreviewView, to: view)
-            
-            // Position indicator at the converted coordinates in the main view
             focusIndicator.center = locationInMainView
             focusIndicator.isHidden = false
             focusIndicator.alpha = 1
@@ -674,9 +937,390 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                     self.focusIndicator.isHidden = true
                 }
             }
-            
         } catch {
             print("Could not set focus point: \(error)")
         }
+    }
+
+    // Update setupTopControlButtons to only include flash
+    private func setupTopControlButtons() {
+        // Create a container view for the flash button only
+        let buttonContainer = UIView()
+        buttonContainer.translatesAutoresizingMaskIntoConstraints = false
+        buttonContainer.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        buttonContainer.layer.cornerRadius = 20
+        view.addSubview(buttonContainer)
+        
+        // Flash button
+        flashButton.translatesAutoresizingMaskIntoConstraints = false
+        flashButton.setImage(UIImage(systemName: "bolt.slash.fill"), for: .normal)
+        flashButton.tintColor = .white
+        flashButton.backgroundColor = .clear
+        flashButton.addTarget(self, action: #selector(toggleFlash), for: .touchUpInside)
+        buttonContainer.addSubview(flashButton)
+        
+        // Position just the flash button in the container
+        NSLayoutConstraint.activate([
+            // Container constraints - narrower for just one button
+            buttonContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            buttonContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            buttonContainer.heightAnchor.constraint(equalToConstant: 40),
+            buttonContainer.widthAnchor.constraint(equalToConstant: 50), // Width for one button
+            
+            // Flash button - centered in container
+            flashButton.centerXAnchor.constraint(equalTo: buttonContainer.centerXAnchor),
+            flashButton.topAnchor.constraint(equalTo: buttonContainer.topAnchor),
+            flashButton.bottomAnchor.constraint(equalTo: buttonContainer.bottomAnchor),
+            flashButton.widthAnchor.constraint(equalToConstant: 40)
+        ])
+    }
+
+    // Flash toggle method
+    @objc private func toggleFlash() {
+        isFlashOn.toggle()
+        
+        if isFlashOn {
+            // Flash ON - yellow icon
+            flashButton.setImage(UIImage(systemName: "bolt.fill"), for: .normal)
+            flashButton.tintColor = .yellow
+        } else {
+            // Flash OFF - white icon with slash
+            flashButton.setImage(UIImage(systemName: "bolt.slash.fill"), for: .normal)
+            flashButton.tintColor = .white
+        }
+        
+        // Give haptic feedback when toggling
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+    }
+
+    private func setupAdvancedSettings() {
+        // Setup the advanced settings button (gear icon)
+        advancedSettingsButton.translatesAutoresizingMaskIntoConstraints = false
+        advancedSettingsButton.setImage(UIImage(systemName: "gearshape.fill"), for: .normal)
+        advancedSettingsButton.tintColor = .white
+        advancedSettingsButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        advancedSettingsButton.layer.cornerRadius = 20
+        advancedSettingsButton.addTarget(self, action: #selector(toggleSettingsPanel), for: .touchUpInside)
+        view.addSubview(advancedSettingsButton)
+        
+        // Settings panel (initially hidden)
+        settingsPanel.translatesAutoresizingMaskIntoConstraints = false
+        settingsPanel.backgroundColor = UIColor.black.withAlphaComponent(0.8)
+        settingsPanel.layer.cornerRadius = 15
+        settingsPanel.alpha = 0
+        settingsPanel.isHidden = true
+        view.addSubview(settingsPanel)
+        
+        // Format section title
+        let formatSectionLabel = UILabel()
+        formatSectionLabel.translatesAutoresizingMaskIntoConstraints = false
+        formatSectionLabel.text = "File Format"
+        formatSectionLabel.textColor = .white
+        formatSectionLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        settingsPanel.addSubview(formatSectionLabel)
+        
+        // Format selection button
+        formatButton.translatesAutoresizingMaskIntoConstraints = false
+        formatButton.setTitle(currentFormat.rawValue, for: .normal)
+        formatButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+        formatButton.backgroundColor = UIColor.darkGray.withAlphaComponent(0.7)
+        formatButton.layer.cornerRadius = 8
+        formatButton.addTarget(self, action: #selector(toggleFormat), for: .touchUpInside)
+        settingsPanel.addSubview(formatButton)
+        
+        // Format description
+        formatLabel.translatesAutoresizingMaskIntoConstraints = false
+        formatLabel.text = getFormatDescription(format: currentFormat)
+        formatLabel.textColor = .lightGray
+        formatLabel.font = UIFont.systemFont(ofSize: 12)
+        formatLabel.numberOfLines = 2
+        settingsPanel.addSubview(formatLabel)
+        
+        // Close button for panel
+        let closeButton = UIButton()
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        closeButton.tintColor = .white
+        closeButton.addTarget(self, action: #selector(hideSettingsPanel), for: .touchUpInside)
+        settingsPanel.addSubview(closeButton)
+        
+        // Add format indicator label next to the settings button
+        formatIndicatorLabel.translatesAutoresizingMaskIntoConstraints = false
+        formatIndicatorLabel.text = currentFormat.rawValue
+        formatIndicatorLabel.textColor = .white
+        formatIndicatorLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        formatIndicatorLabel.textAlignment = .center
+        formatIndicatorLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        formatIndicatorLabel.layer.cornerRadius = 8
+        formatIndicatorLabel.clipsToBounds = true
+        view.addSubview(formatIndicatorLabel)
+        
+        // Layout constraints
+        NSLayoutConstraint.activate([
+            // Advanced settings button
+            advancedSettingsButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+            advancedSettingsButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            advancedSettingsButton.widthAnchor.constraint(equalToConstant: 40),
+            advancedSettingsButton.heightAnchor.constraint(equalToConstant: 40),
+            
+            // Settings panel
+            settingsPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -100),
+            settingsPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            settingsPanel.widthAnchor.constraint(equalToConstant: 200),
+            settingsPanel.heightAnchor.constraint(equalToConstant: 140),
+            
+            // Format section
+            formatSectionLabel.topAnchor.constraint(equalTo: settingsPanel.topAnchor, constant: 15),
+            formatSectionLabel.leadingAnchor.constraint(equalTo: settingsPanel.leadingAnchor, constant: 15),
+            formatSectionLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -10),
+            
+            // Format button
+            formatButton.topAnchor.constraint(equalTo: formatSectionLabel.bottomAnchor, constant: 10),
+            formatButton.leadingAnchor.constraint(equalTo: settingsPanel.leadingAnchor, constant: 15),
+            formatButton.trailingAnchor.constraint(equalTo: settingsPanel.trailingAnchor, constant: -15),
+            formatButton.heightAnchor.constraint(equalToConstant: 40),
+            
+            // Format description
+            formatLabel.topAnchor.constraint(equalTo: formatButton.bottomAnchor, constant: 8),
+            formatLabel.leadingAnchor.constraint(equalTo: settingsPanel.leadingAnchor, constant: 15),
+            formatLabel.trailingAnchor.constraint(equalTo: settingsPanel.trailingAnchor, constant: -15),
+            
+            // Close button
+            closeButton.topAnchor.constraint(equalTo: settingsPanel.topAnchor, constant: 10),
+            closeButton.trailingAnchor.constraint(equalTo: settingsPanel.trailingAnchor, constant: -10),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24),
+            
+            // Position format indicator between capture button and settings button
+            formatIndicatorLabel.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+            formatIndicatorLabel.trailingAnchor.constraint(equalTo: advancedSettingsButton.leadingAnchor, constant: -10),
+            formatIndicatorLabel.widthAnchor.constraint(equalToConstant: 50),
+            formatIndicatorLabel.heightAnchor.constraint(equalToConstant: 24)
+        ])
+    }
+
+    @objc private func toggleSettingsPanel() {
+        if isSettingsPanelVisible {
+            hideSettingsPanel()
+        } else {
+            showSettingsPanel()
+        }
+    }
+
+    @objc private func showSettingsPanel() {
+        settingsPanel.isHidden = false
+        
+        UIView.animate(withDuration: 0.3, animations: {
+            self.settingsPanel.alpha = 1.0
+        })
+        
+        isSettingsPanelVisible = true
+        
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+    }
+
+    @objc private func hideSettingsPanel() {
+        UIView.animate(withDuration: 0.2, animations: {
+            self.settingsPanel.alpha = 0
+        }) { _ in
+            self.settingsPanel.isHidden = true
+        }
+        
+        isSettingsPanelVisible = false
+    }
+
+    @objc private func toggleFormat() {
+        let formats = PhotoFormat.allCases
+        if let currentIndex = formats.firstIndex(of: currentFormat) {
+            let nextIndex = (currentIndex + 1) % formats.count
+            currentFormat = formats[nextIndex]
+            
+            // Update format display in both places
+            formatButton.setTitle(currentFormat.rawValue, for: .normal)
+            formatIndicatorLabel.text = currentFormat.rawValue
+            formatLabel.text = getFormatDescription(format: currentFormat)
+            
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+        }
+    }
+
+    private func getFormatDescription(format: PhotoFormat) -> String {
+        switch format {
+        case .heic:
+            return "Smaller file size, better quality, iOS/macOS only"
+        case .jpeg:
+            return "Standard format compatible with all devices"
+        case .png:
+            return "Lossless format, best quality but larger files"
+        }
+    }
+
+    private func setupExposureControl() {
+        // Container view in the top black area
+        exposureView = UIView()
+        exposureView.translatesAutoresizingMaskIntoConstraints = false
+        exposureView.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        exposureView.layer.cornerRadius = 15
+        exposureView.alpha = 1.0 // Always visible
+        view.addSubview(exposureView)
+        
+        // Create label to display current EV value
+        let currentEVLabel = UILabel()
+        currentEVLabel.translatesAutoresizingMaskIntoConstraints = false
+        currentEVLabel.textColor = .white
+        currentEVLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        currentEVLabel.textAlignment = .center
+        currentEVLabel.text = "EV: 0.0"
+        view.addSubview(currentEVLabel)
+        
+        // Slider - will get min/max values dynamically
+        exposureSlider = UISlider()
+        exposureSlider.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Dynamically determine the exposure range from the camera device
+        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+        if let device = device {
+            // Get actual range from device capabilities
+            let minExposure = device.minExposureTargetBias
+            let maxExposure = device.maxExposureTargetBias
+            
+            exposureSlider.minimumValue = minExposure
+            exposureSlider.maximumValue = maxExposure
+        } else {
+            // Fallback values based on common iPhone range (most models support approximately -6 to +6)
+            exposureSlider.minimumValue = -8.0
+            exposureSlider.maximumValue = 8.0
+        }
+        
+        // Store reference to the label for updating from slider events
+        self.currentEVLabel = currentEVLabel
+        
+        exposureSlider.value = 0.0  // Start at neutral exposure
+        exposureSlider.minimumTrackTintColor = UIColor.yellow
+        exposureSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.5)
+        exposureSlider.thumbTintColor = UIColor.white
+        exposureSlider.addTarget(self, action: #selector(exposureValueChanged(_:)), for: .valueChanged)
+        exposureView.addSubview(exposureSlider)
+        
+        // Icons for min/max exposure
+        let sunMinImage = UIImageView(image: UIImage(systemName: "sun.min"))
+        let sunMaxImage = UIImageView(image: UIImage(systemName: "sun.max"))
+        sunMinImage.translatesAutoresizingMaskIntoConstraints = false
+        sunMaxImage.translatesAutoresizingMaskIntoConstraints = false
+        sunMinImage.tintColor = .white
+        sunMaxImage.tintColor = .white
+        sunMinImage.contentMode = .scaleAspectFit
+        sunMaxImage.contentMode = .scaleAspectFit
+        exposureView.addSubview(sunMinImage)
+        exposureView.addSubview(sunMaxImage)
+        
+        // Add value labels to show the actual range - will update with actual range
+        let minValueLabel = UILabel()
+        let maxValueLabel = UILabel()
+        
+        if let device = device {
+            minValueLabel.text = String(format: "%.0f", device.minExposureTargetBias)
+            maxValueLabel.text = String(format: "+%.0f", device.maxExposureTargetBias)
+        } else {
+            minValueLabel.text = "-6"
+            maxValueLabel.text = "+6"
+        }
+        
+        minValueLabel.textColor = .white
+        minValueLabel.font = UIFont.systemFont(ofSize: 8)
+        minValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        maxValueLabel.textColor = .white
+        maxValueLabel.font = UIFont.systemFont(ofSize: 8)
+        maxValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        exposureView.addSubview(minValueLabel)
+        exposureView.addSubview(maxValueLabel)
+        
+        // Same layout constraints as before
+        NSLayoutConstraint.activate([
+            exposureView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            exposureView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            exposureView.widthAnchor.constraint(equalToConstant: 280),
+            exposureView.heightAnchor.constraint(equalToConstant: 40),
+            
+            sunMinImage.leadingAnchor.constraint(equalTo: exposureView.leadingAnchor, constant: 10),
+            sunMinImage.centerYAnchor.constraint(equalTo: exposureView.centerYAnchor),
+            sunMinImage.widthAnchor.constraint(equalToConstant: 20),
+            sunMinImage.heightAnchor.constraint(equalToConstant: 20),
+            
+            exposureSlider.leadingAnchor.constraint(equalTo: sunMinImage.trailingAnchor, constant: 5),
+            exposureSlider.trailingAnchor.constraint(equalTo: sunMaxImage.leadingAnchor, constant: -5),
+            exposureSlider.centerYAnchor.constraint(equalTo: exposureView.centerYAnchor),
+            
+            sunMaxImage.trailingAnchor.constraint(equalTo: exposureView.trailingAnchor, constant: -10),
+            sunMaxImage.centerYAnchor.constraint(equalTo: exposureView.centerYAnchor),
+            sunMaxImage.widthAnchor.constraint(equalToConstant: 20),
+            sunMaxImage.heightAnchor.constraint(equalToConstant: 20),
+            
+            minValueLabel.centerXAnchor.constraint(equalTo: sunMinImage.centerXAnchor),
+            minValueLabel.topAnchor.constraint(equalTo: sunMinImage.bottomAnchor, constant: 2),
+            
+            maxValueLabel.centerXAnchor.constraint(equalTo: sunMaxImage.centerXAnchor),
+            maxValueLabel.topAnchor.constraint(equalTo: sunMaxImage.bottomAnchor, constant: 2),
+            
+            // Position the EV label under the exposure slider
+            currentEVLabel.topAnchor.constraint(equalTo: exposureView.bottomAnchor, constant: 5),
+            currentEVLabel.centerXAnchor.constraint(equalTo: exposureView.centerXAnchor),
+            currentEVLabel.widthAnchor.constraint(equalToConstant: 80),
+            currentEVLabel.heightAnchor.constraint(equalToConstant: 20)
+        ])
+    }
+
+    @objc private func exposureValueChanged(_ slider: UISlider) {
+        guard let device = videoDeviceInput?.device else { return }
+        
+        do {
+            try device.lockForConfiguration()
+            
+            // Use continuous auto exposure mode to keep adjusting to the scene
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            
+            // Apply the exposure bias
+            let bias = slider.value
+            device.setExposureTargetBias(bias)
+            
+            // Update EV label with current value
+            currentEVLabel?.text = String(format: "EV: %.1f", bias)
+            
+            device.unlockForConfiguration()
+        } catch {
+            print("Could not adjust exposure: \(error)")
+        }
+    }
+
+    private func setupLocationServices() {
+        // Configure location manager
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.requestWhenInUseAuthorization()
+        
+        // Start updating location if authorized
+        if CLLocationManager.locationServicesEnabled() {
+            locationManager.startUpdatingLocation()
+        }
+    }
+}
+
+// Keep this extension with CLLocationManagerDelegate implementation
+extension CameraViewController: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        currentLocation = locations.last
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location manager failed with error: \(error.localizedDescription)")
     }
 }

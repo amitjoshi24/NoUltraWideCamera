@@ -16,5 +16,8 @@
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
+    <!-- Add these keys for location permissions -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>This app needs access to your location to add geolocation data to your photos.</string>
 </dict>
 </plist>

@@ -9,6 +9,8 @@ I actually love the ultra-wide camera for landscape pictures, but when it comes 
 - ✅ **Only zooms to 1.0x or telephoto zoom (iPhone model specific, usually 2x, 3x, or 5x)**
 - 📸 Clean, native-style interface
 - 🤳 Tap to focus
+- 🗂 Choose photo file format (HEIC, JPEG, PNG.)
+- 🌞💡 Manually adjust exposure (brightness control)
 - 🔍 Tap pre-set levels to zoom (min 1.0x), and uses the telephoto lens for optical zoom.
 - 🖼 Instant photo previews with camera roll access
 - ⚡️ Haptic feedback + shutter flash animation
