@@ -107,6 +107,9 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     // Add this property
     private let formatIndicatorLabel = UILabel()
 
+    // Add this property to track device orientation
+    private var currentOrientation: UIDeviceOrientation = .portrait
+
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -242,6 +245,27 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         previewLayer?.videoGravity = .resizeAspect // Use aspect to maintain true 3:4 ratio
         previewView.layer.addSublayer(previewLayer!)
         previewView.backgroundColor = .black
+
+        // Add device orientation monitoring
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(deviceOrientationChanged),
+            name: UIDevice.orientationDidChangeNotification,
+            object: nil
+        )
+        
+        // Initialize current orientation
+        currentOrientation = UIDevice.current.orientation
+    }
+
+    // Handle orientation changes
+    @objc private func deviceOrientationChanged() {
+        // Only update if it's a valid orientation
+        let orientation = UIDevice.current.orientation
+        if orientation.isPortrait || orientation.isLandscape {
+            currentOrientation = orientation
+        }
     }
 
     private func setupCaptureButton() {
@@ -461,14 +485,21 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
             }
             
-            // Add location metadata if available - using the proper metadata approach
+            // Add location metadata if available
+            var metadata = settings.metadata ?? [:]
+            
+            // CRITICAL FIX: Set orientation directly in the top-level metadata
+            // This is more reliable than putting it in the EXIF dictionary
+            let exifOrientation = getImageOrientationFromDeviceOrientation()
+            metadata[kCGImagePropertyOrientation as String] = exifOrientation.rawValue
+            
+            // Also add it to the EXIF dictionary for compatibility
+            var exifDictionary = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+            exifDictionary[kCGImagePropertyOrientation as String] = exifOrientation.rawValue
+            metadata[kCGImagePropertyExifDictionary as String] = exifDictionary
+            
+            // Add location metadata if available
             if let location = currentLocation {
-                // Create metadata dictionary if needed
-                var metadata = settings.metadata
-                if metadata == nil {
-                    metadata = [:]
-                }
-                
                 // Create GPS metadata dictionary
                 let gpsDictionary = [
                     kCGImagePropertyGPSLatitude as String: abs(location.coordinate.latitude),
@@ -482,31 +513,17 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                     kCGImagePropertyGPSDateStamp as String: Date()
                 ] as [String : Any]
                 
-                // Add GPS dictionary to Exif metadata
-                var exifDictionary: [String: Any] = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+                // Add GPS dictionary to the metadata
                 metadata[kCGImagePropertyGPSDictionary as String] = gpsDictionary
-                metadata[kCGImagePropertyExifDictionary as String] = exifDictionary
-                
-                // Set the updated metadata
-                settings.metadata = metadata
             }
+            
+            // Set the updated metadata
+            settings.metadata = metadata
             
             // Set flash mode based on user selection
             if isFlashOn {
-                if let device = videoDeviceInput?.device, device.hasTorch {
-                    try device.lockForConfiguration()
-                    if device.isTorchModeSupported(.on) {
-                        device.torchMode = .on
-                    }
-                    device.unlockForConfiguration()
-                }
                 settings.flashMode = .on
             } else {
-                if let device = videoDeviceInput?.device, device.hasTorch && device.torchMode == .on {
-                    try device.lockForConfiguration()
-                    device.torchMode = .off
-                    device.unlockForConfiguration()
-                }
                 settings.flashMode = .off
             }
             
@@ -530,11 +547,38 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         
         var imageData = photo.fileDataRepresentation()
         
-        // Handle PNG conversion if needed
-        if currentFormat == .png, let jpegData = imageData, let image = UIImage(data: jpegData) {
-            imageData = image.pngData()  // Convert to PNG
+        // IMPORTANT: For PNG conversion, we need to preserve the orientation
+        if currentFormat == .png, let jpegData = imageData {
+            let ciImage = CIImage(data: jpegData)
+            let context = CIContext()
+            
+            if let ciImage = ciImage, let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
+                // Create a UIImage with correct orientation
+                
+                // Get the metadata - photo.metadata is not optional
+                let metadata = photo.metadata
+                
+                // Get orientation from metadata if available
+                if let orientationNumber = metadata[kCGImagePropertyOrientation as String] as? NSNumber,
+                   let orientation = CGImagePropertyOrientation(rawValue: orientationNumber.uint32Value) {
+                    
+                    // Convert CGImagePropertyOrientation to UIImage.Orientation
+                    let uiOrientation = convertToUIImageOrientation(from: orientation)
+                    
+                    // Create a new UIImage with the correct orientation
+                    let orientedImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: uiOrientation)
+                    
+                    // Convert to PNG
+                    imageData = orientedImage.pngData()
+                } else {
+                    // Fallback if orientation metadata is missing
+                    let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
+                    imageData = uiImage.pngData()
+                }
+            }
         }
         
+        // Save the image to the photo library
         if let data = imageData {
             PHPhotoLibrary.requestAuthorization { status in
                 if status == .authorized {
@@ -542,36 +586,30 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                         let creationRequest = PHAssetCreationRequest.forAsset()
                         creationRequest.addResource(with: .photo, data: data, options: nil)
                     }, completionHandler: { success, error in
-                        if let error = error {
-                            print("Error saving photo with metadata: \(error.localizedDescription)")
-                        } else {
-                            DispatchQueue.main.async {
+                        DispatchQueue.main.async {
+                            if success {
                                 self.updateThumbnailImage()
-                                
-                                // Show success message
-                                let successView = UIView(frame: CGRect(x: 0, y: 0, width: 150, height: 50))
-                                successView.center = self.view.center
-                                successView.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-                                successView.layer.cornerRadius = 10
-                                
-                                let label = UILabel(frame: successView.bounds)
-                                label.text = "Photo Saved"
-                                label.textColor = .white
-                                label.textAlignment = .center
-                                
-                                successView.addSubview(label)
-                                self.view.addSubview(successView)
-                                
-                                UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
-                                    successView.alpha = 0
-                                }, completion: { _ in
-                                    successView.removeFromSuperview()
-                                })
+                            } else if let error = error {
+                                print("Error saving photo: \(error.localizedDescription)")
                             }
                         }
                     })
                 }
             }
+        }
+    }
+
+    // Helper method to convert CGImagePropertyOrientation to UIImage.Orientation
+    private func convertToUIImageOrientation(from cgOrientation: CGImagePropertyOrientation) -> UIImage.Orientation {
+        switch cgOrientation {
+        case .up: return .up
+        case .upMirrored: return .upMirrored
+        case .down: return .down
+        case .downMirrored: return .downMirrored
+        case .left: return .left
+        case .leftMirrored: return .leftMirrored
+        case .right: return .right
+        case .rightMirrored: return .rightMirrored
         }
     }
 
@@ -1012,12 +1050,13 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         settingsPanel.isHidden = true
         view.addSubview(settingsPanel)
         
-        // Format section title
+        // Format section title with dynamic type
         let formatSectionLabel = UILabel()
         formatSectionLabel.translatesAutoresizingMaskIntoConstraints = false
         formatSectionLabel.text = "File Format"
         formatSectionLabel.textColor = .white
-        formatSectionLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        formatSectionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline) // Dynamic type
+        formatSectionLabel.adjustsFontForContentSizeCategory = true
         settingsPanel.addSubview(formatSectionLabel)
         
         // Format selection button
@@ -1029,11 +1068,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         formatButton.addTarget(self, action: #selector(toggleFormat), for: .touchUpInside)
         settingsPanel.addSubview(formatButton)
         
-        // Format description
+        // Format description with dynamic type
         formatLabel.translatesAutoresizingMaskIntoConstraints = false
         formatLabel.text = getFormatDescription(format: currentFormat)
         formatLabel.textColor = .lightGray
-        formatLabel.font = UIFont.systemFont(ofSize: 12)
+        formatLabel.font = UIFont.preferredFont(forTextStyle: .caption2) // Dynamic type
+        formatLabel.adjustsFontForContentSizeCategory = true
         formatLabel.numberOfLines = 2
         settingsPanel.addSubview(formatLabel)
         
@@ -1045,11 +1085,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         closeButton.addTarget(self, action: #selector(hideSettingsPanel), for: .touchUpInside)
         settingsPanel.addSubview(closeButton)
         
-        // Add format indicator label next to the settings button
+        // Format indicator label with dynamic type
         formatIndicatorLabel.translatesAutoresizingMaskIntoConstraints = false
         formatIndicatorLabel.text = currentFormat.rawValue
         formatIndicatorLabel.textColor = .white
-        formatIndicatorLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        formatIndicatorLabel.font = UIFont.preferredFont(forTextStyle: .caption1) // Dynamic type
+        formatIndicatorLabel.adjustsFontForContentSizeCategory = true
         formatIndicatorLabel.textAlignment = .center
         formatIndicatorLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
         formatIndicatorLabel.layer.cornerRadius = 8
@@ -1169,11 +1210,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         exposureView.alpha = 1.0 // Always visible
         view.addSubview(exposureView)
         
-        // Create label to display current EV value
+        // Create label to display current EV value with dynamic type support
         let currentEVLabel = UILabel()
         currentEVLabel.translatesAutoresizingMaskIntoConstraints = false
         currentEVLabel.textColor = .white
-        currentEVLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        currentEVLabel.font = UIFont.preferredFont(forTextStyle: .footnote) // Dynamic type support
+        currentEVLabel.adjustsFontForContentSizeCategory = true // Adjust with system settings
         currentEVLabel.textAlignment = .center
         currentEVLabel.text = "EV: 0.0"
         view.addSubview(currentEVLabel)
@@ -1227,16 +1269,17 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             minValueLabel.text = String(format: "%.0f", device.minExposureTargetBias)
             maxValueLabel.text = String(format: "+%.0f", device.maxExposureTargetBias)
         } else {
-            minValueLabel.text = "-6"
-            maxValueLabel.text = "+6"
+            minValueLabel.text = "-8"
+            maxValueLabel.text = "+8"
         }
         
+        // Larger font size for min/max labels
         minValueLabel.textColor = .white
-        minValueLabel.font = UIFont.systemFont(ofSize: 8)
+        minValueLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium) // Increased from 8 to 12
         minValueLabel.translatesAutoresizingMaskIntoConstraints = false
         
         maxValueLabel.textColor = .white
-        maxValueLabel.font = UIFont.systemFont(ofSize: 8)
+        maxValueLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium) // Increased from 8 to 12
         maxValueLabel.translatesAutoresizingMaskIntoConstraints = false
         
         exposureView.addSubview(minValueLabel)
@@ -1311,6 +1354,31 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         if CLLocationManager.locationServicesEnabled() {
             locationManager.startUpdatingLocation()
         }
+    }
+
+    // Helper method to convert device orientation to image orientation
+    private func getImageOrientationFromDeviceOrientation() -> CGImagePropertyOrientation {
+        // The mapping is not straightforward because the front/back camera are oriented differently
+        let isUsingFrontCamera = videoDeviceInput?.device.position == .front
+        
+        switch currentOrientation {
+        case .portrait:
+            return isUsingFrontCamera ? .leftMirrored : .right
+        case .portraitUpsideDown:
+            return isUsingFrontCamera ? .rightMirrored : .left
+        case .landscapeLeft:
+            return isUsingFrontCamera ? .downMirrored : .up
+        case .landscapeRight:
+            return isUsingFrontCamera ? .upMirrored : .down
+        default:
+            return isUsingFrontCamera ? .leftMirrored : .right // Default to portrait
+        }
+    }
+
+    // Make sure to clean up in deinit
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
     }
 }
 
