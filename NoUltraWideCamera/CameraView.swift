@@ -345,7 +345,9 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
     private func setupCameraToggleButtons() {
-        // 1x Button (Wide Angle)
+        checkAvailableCameras()
+        
+        // Wide angle button (1x)
         wideAngleButton.translatesAutoresizingMaskIntoConstraints = false
         wideAngleButton.setTitle("1x", for: .normal)
         wideAngleButton.titleLabel?.font = scaledDynamicFont(forTextStyle: .body)
@@ -353,10 +355,23 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         wideAngleButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
         wideAngleButton.layer.cornerRadius = 25
         wideAngleButton.addTarget(self, action: #selector(switchToWideAngle), for: .touchUpInside)
-        wideAngleButton.alpha = 1.0
+        wideAngleButton.alpha = 1.0 // Start with wide angle as active
         view.addSubview(wideAngleButton)
         
-        // 2x Button (Optical-quality from main sensor)
+        // Telephoto button (2x, 3x or 5x) - if available
+        if hasTelephotoCamera {
+            telephotoButton.translatesAutoresizingMaskIntoConstraints = false
+            telephotoButton.setTitle("\(Int(telephotoZoomFactor))x", for: .normal)
+            telephotoButton.titleLabel?.font = scaledDynamicFont(forTextStyle: .body)
+            telephotoButton.titleLabel?.adjustsFontForContentSizeCategory = true
+            telephotoButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            telephotoButton.layer.cornerRadius = 25
+            telephotoButton.addTarget(self, action: #selector(switchToTelephoto), for: .touchUpInside)
+            telephotoButton.alpha = 0.4
+            view.addSubview(telephotoButton)
+        }
+        
+        // Add 2x optical quality zoom button if available and telephoto > 2
         if has2xOpticalQualityZoom && telephotoZoomFactor > 2.0 {
             twoXButton.translatesAutoresizingMaskIntoConstraints = false
             twoXButton.setTitle("2x", for: .normal)
@@ -364,133 +379,225 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             twoXButton.titleLabel?.adjustsFontForContentSizeCategory = true
             twoXButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
             twoXButton.layer.cornerRadius = 25
-            twoXButton.addTarget(self, action: #selector(switchToTwoX), for: .touchUpInside)
+            twoXButton.addTarget(self, action: #selector(switchTo2X), for: .touchUpInside)
             twoXButton.alpha = 0.4
             view.addSubview(twoXButton)
         }
         
-        // Telephoto Button (2x, 3x, or 5x depending on the device)
-        telephotoButton.translatesAutoresizingMaskIntoConstraints = false
-        telephotoButton.setTitle("\(Int(telephotoZoomFactor))x", for: .normal)
-        telephotoButton.titleLabel?.font = scaledDynamicFont(forTextStyle: .body)
-        telephotoButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        telephotoButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        telephotoButton.layer.cornerRadius = 25
-        telephotoButton.addTarget(self, action: #selector(switchToTelephoto), for: .touchUpInside)
-        telephotoButton.alpha = 0.4
-        telephotoButton.isHidden = !hasTelephotoCamera // Hide if no telephoto available
-        view.addSubview(telephotoButton)
+        // Create a container for buttons to help with centering
+        let buttonStack = UIStackView()
+        buttonStack.translatesAutoresizingMaskIntoConstraints = false
+        buttonStack.axis = .horizontal
+        buttonStack.alignment = .center
+        buttonStack.distribution = .equalSpacing
+        buttonStack.spacing = 10
+        view.addSubview(buttonStack)
         
-        // Layout - Position the buttons in a row
+        // Add buttons to stack
+        buttonStack.addArrangedSubview(wideAngleButton)
+        if has2xOpticalQualityZoom && telephotoZoomFactor > 2.0 {
+            buttonStack.addArrangedSubview(twoXButton)
+        }
+        if hasTelephotoCamera {
+            buttonStack.addArrangedSubview(telephotoButton)
+        }
+        
+        // Center the stack view
+        NSLayoutConstraint.activate([
+            buttonStack.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
+            buttonStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            // Fixed sizes for buttons
+            wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
+            wideAngleButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        // Add height/width constraints for other buttons
         if has2xOpticalQualityZoom && telephotoZoomFactor > 2.0 {
             NSLayoutConstraint.activate([
-                wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-                wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -40),
-                wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
-                wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
-                
-                twoXButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-                twoXButton.centerXAnchor.constraint(equalTo: captureButton.centerXAnchor),
                 twoXButton.widthAnchor.constraint(equalToConstant: 50),
-                twoXButton.heightAnchor.constraint(equalToConstant: 50),
-                
-                telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-                telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 40),
-                telephotoButton.widthAnchor.constraint(equalToConstant: 50),
-                telephotoButton.heightAnchor.constraint(equalToConstant: 50)
+                twoXButton.heightAnchor.constraint(equalToConstant: 50)
             ])
-        } else {
-            // Keep existing layout for devices without 2x button
+        }
+        
+        if hasTelephotoCamera {
             NSLayoutConstraint.activate([
-                wideAngleButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-                wideAngleButton.trailingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: -15),
-                wideAngleButton.widthAnchor.constraint(equalToConstant: 50),
-                wideAngleButton.heightAnchor.constraint(equalToConstant: 50),
-                
-                telephotoButton.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -20),
-                telephotoButton.leadingAnchor.constraint(equalTo: captureButton.centerXAnchor, constant: 15),
                 telephotoButton.widthAnchor.constraint(equalToConstant: 50),
                 telephotoButton.heightAnchor.constraint(equalToConstant: 50)
             ])
         }
     }
 
-    @objc private func switchToWideAngle() {
-        if !isUsingTelephoto && videoDeviceInput?.device.videoZoomFactor == 1.0 {
-            return // Already at 1x on wide angle
+    // Implement a helper method to update all button states
+    private func updateCameraButtonHighlighting(activeButton: UIButton) {
+        // Set all buttons to dimmed state first
+        if let ultraWideButton = view.viewWithTag(301) as? UIButton {
+            ultraWideButton.alpha = 0.4
         }
-        
-        if isUsingTelephoto {
-            // Switch to wide angle camera
-            let switchSuccessful = switchToCamera(type: .builtInWideAngleCamera)
-            if !switchSuccessful { return }
-        }
-        
-        // Ensure zoom is set to 1.0x
-        if let device = videoDeviceInput?.device {
-            try? device.lockForConfiguration()
-            device.videoZoomFactor = 1.0
-            device.unlockForConfiguration()
-        }
-        
-        // Update UI
-        isUsingTelephoto = false
-        isUsingUltraWide = false
-        wideAngleButton.alpha = 1.0
+        wideAngleButton.alpha = 0.4
         if has2xOpticalQualityZoom {
             twoXButton.alpha = 0.4
         }
         telephotoButton.alpha = 0.4
-        permanentZoomLabel.text = "1.0x"
+        
+        // Then highlight only the active button
+        activeButton.alpha = 1.0
     }
 
-    @objc private func switchToTelephoto() {
-        if isUsingTelephoto || !hasTelephotoCamera { return } // Already using telephoto or not available
+    // Replace the switchToWideAngle method with this corrected version
+    @objc private func switchToWideAngle() {
+        guard let captureSession = captureSession else { return }
         
-        let switchSuccessful = switchToCamera(type: .builtInTelephotoCamera)
-        if switchSuccessful {
-            isUsingTelephoto = true
-            isUsingUltraWide = false
+        // Update button states
+        updateCameraButtonHighlighting(activeButton: wideAngleButton)
+        
+        // Skip if already using wide angle camera with no flags set
+        if !isUsingTelephoto && !isUsingUltraWide &&
+           videoDeviceInput?.device.deviceType == .builtInWideAngleCamera {
+            return
+        }
+        
+        do {
+            captureSession.beginConfiguration()
             
-            // Fix: Button appearance - telephoto should be highlighted, 1x dimmed
-            wideAngleButton.alpha = 0.4
-            telephotoButton.alpha = 1.0
-            
-            // Reset zoom on telephoto
-            if let device = videoDeviceInput?.device {
-                try? device.lockForConfiguration()
-                device.videoZoomFactor = 1.0
-                device.unlockForConfiguration()
+            // Remove current input
+            if let input = videoDeviceInput {
+                captureSession.removeInput(input)
             }
             
-            permanentZoomLabel.text = String(format: "%.1fx", telephotoZoomFactor)
+            // Add wide angle camera input
+            if let wideAngleCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+               let wideAngleInput = try? AVCaptureDeviceInput(device: wideAngleCamera) {
+                if captureSession.canAddInput(wideAngleInput) {
+                    captureSession.addInput(wideAngleInput)
+                    videoDeviceInput = wideAngleInput
+                    isUsingTelephoto = false
+                    isUsingUltraWide = false
+                    
+                    // Update zoom label
+                    permanentZoomLabel.text = "1.0×"
+                }
+            }
+            
+            captureSession.commitConfiguration()
+            
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+        } catch {
+            print("Error switching to wide angle camera: \(error)")
         }
     }
 
-    @objc private func switchToTwoX() {
-        // First ensure we're using the wide angle camera
-        if isUsingTelephoto {
-            switchToCamera(type: .builtInWideAngleCamera)
+    // Update the switchToTelephoto method for consistency
+    @objc private func switchToTelephoto() {
+        guard let captureSession = captureSession, hasTelephotoCamera else { return }
+        
+        // Update button states
+        updateCameraButtonHighlighting(activeButton: telephotoButton)
+        
+        do {
+            captureSession.beginConfiguration()
+            
+            // Remove current input
+            if let input = videoDeviceInput {
+                captureSession.removeInput(input)
+            }
+            
+            // Add telephoto camera input
+            if let telephotoCamera = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
+               let telephotoInput = try? AVCaptureDeviceInput(device: telephotoCamera) {
+                if captureSession.canAddInput(telephotoInput) {
+                    captureSession.addInput(telephotoInput)
+                    videoDeviceInput = telephotoInput
+                    isUsingTelephoto = true
+                    isUsingUltraWide = false
+                    
+                    // Update zoom label
+                    permanentZoomLabel.text = String(format: "%.1f×", telephotoZoomFactor)
+                }
+            }
+            
+            captureSession.commitConfiguration()
+            
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+        } catch {
+            print("Error switching to telephoto camera: \(error)")
+        }
+    }
+
+    // Update switchTo2X method for consistency
+    @objc private func switchTo2X() {
+        // Update button states
+        updateCameraButtonHighlighting(activeButton: twoXButton)
+        
+        // First ensure we're using the wide angle camera (not telephoto or ultra-wide)
+        if isUsingTelephoto || isUsingUltraWide {
+            switchToWideAngle()
         }
         
-        // Apply 2x zoom on the wide angle camera
-        if let device = videoDeviceInput?.device {
-            do {
+        // Then apply 2x zoom
+        do {
+            if let device = videoDeviceInput?.device {
                 try device.lockForConfiguration()
                 device.videoZoomFactor = 2.0
                 device.unlockForConfiguration()
                 
-                // Update UI
-                permanentZoomLabel.text = "2.0x"
-                wideAngleButton.alpha = 0.4
-                twoXButton.alpha = 1.0
-                telephotoButton.alpha = 0.4
+                // Update zoom label
+                permanentZoomLabel.text = "2.0×"
                 
-                isUsingTelephoto = false
-                isUsingUltraWide = false
-            } catch {
-                print("Could not set 2x zoom: \(error)")
+                // Haptic feedback
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
             }
+        } catch {
+            print("Error setting zoom: \(error)")
+        }
+    }
+
+    // Update switchToUltraWide method for consistency
+    @objc private func switchToUltraWide() {
+        guard let captureSession = captureSession else { return }
+        
+        // Only proceed if we have an ultra-wide camera
+        guard hasUltraWideCamera else { return }
+        
+        // Get the ultra-wide button and update highlights
+        if let ultraWideButton = view.viewWithTag(301) as? UIButton {
+            updateCameraButtonHighlighting(activeButton: ultraWideButton)
+        }
+        
+        do {
+            captureSession.beginConfiguration()
+            
+            // Remove existing input
+            if let input = videoDeviceInput {
+                captureSession.removeInput(input)
+            }
+            
+            // Add ultra-wide camera input
+            if let ultraWideCamera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back),
+               let ultraWideInput = try? AVCaptureDeviceInput(device: ultraWideCamera) {
+                if captureSession.canAddInput(ultraWideInput) {
+                    captureSession.addInput(ultraWideInput)
+                    videoDeviceInput = ultraWideInput
+                    isUsingUltraWide = true
+                    isUsingTelephoto = false
+                    
+                    // Update the zoom label
+                    permanentZoomLabel.text = "0.5×"
+                }
+            }
+            
+            captureSession.commitConfiguration()
+            
+            // Haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+        } catch {
+            print("Error switching to ultra-wide camera: \(error)")
         }
     }
 
@@ -1079,12 +1186,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
     private func setupAdvancedSettings() {
-        // Setup the advanced settings button (gear icon)
+        // Setup the advanced settings button (gear icon) - BIGGER SIZE
         advancedSettingsButton.translatesAutoresizingMaskIntoConstraints = false
         advancedSettingsButton.setImage(UIImage(systemName: "gearshape.fill"), for: .normal)
         advancedSettingsButton.tintColor = .white
         advancedSettingsButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        advancedSettingsButton.layer.cornerRadius = 20
+        advancedSettingsButton.layer.cornerRadius = 25 // Increased from 20
         advancedSettingsButton.addTarget(self, action: #selector(toggleSettingsPanel), for: .touchUpInside)
         view.addSubview(advancedSettingsButton)
         
@@ -1109,6 +1216,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         contentView.translatesAutoresizingMaskIntoConstraints = false
         settingsScrollView.addSubview(contentView)
         
+        // FORMAT SECTION
         // Format section title with dynamic type
         let formatSectionLabel = UILabel()
         formatSectionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1128,7 +1236,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         formatButton.layer.cornerRadius = 8
         formatButton.addTarget(self, action: #selector(toggleFormat), for: .touchUpInside)
         contentView.addSubview(formatButton)
-
+        
         // Update the hint label to use a proper arrow symbol and support wrapping
         let hintLabel = UILabel()
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1148,6 +1256,57 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         formatLabel.adjustsFontForContentSizeCategory = true
         formatLabel.numberOfLines = 0 // Allow multiple lines
         contentView.addSubview(formatLabel)
+        
+        // LENS SECTION - Add Ultra-Wide lens toggle
+        // Add a separator
+        let separator = UIView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = UIColor.gray.withAlphaComponent(0.5)
+        contentView.addSubview(separator)
+        
+        // Add lens section title
+        let lensSectionLabel = UILabel()
+        lensSectionLabel.translatesAutoresizingMaskIntoConstraints = false
+        lensSectionLabel.text = "Camera Lenses"
+        lensSectionLabel.textColor = .white
+        lensSectionLabel.font = scaledDynamicFont(forTextStyle: .headline)
+        lensSectionLabel.adjustsFontForContentSizeCategory = true
+        contentView.addSubview(lensSectionLabel)
+        
+        // Add ultra-wide lens toggle label
+        let ultraWideLensLabel = UILabel()
+        ultraWideLensLabel.translatesAutoresizingMaskIntoConstraints = false
+        ultraWideLensLabel.text = "Show 0.5x Ultra-Wide Lens"
+        ultraWideLensLabel.textColor = .white
+        ultraWideLensLabel.font = scaledDynamicFont(forTextStyle: .body)
+        ultraWideLensLabel.adjustsFontForContentSizeCategory = true
+        ultraWideLensLabel.numberOfLines = 0  // Allow multiple lines
+        contentView.addSubview(ultraWideLensLabel)
+        
+        // Add toggle switch for ultra-wide lens
+        let ultraWideToggle = UISwitch()
+        ultraWideToggle.translatesAutoresizingMaskIntoConstraints = false
+        ultraWideToggle.isOn = false // Default to off
+        ultraWideToggle.onTintColor = .systemBlue
+        ultraWideToggle.addTarget(self, action: #selector(toggleUltraWideLens(_:)), for: .valueChanged)
+        contentView.addSubview(ultraWideToggle)
+        
+        // Only enable the toggle if the device has ultra-wide lens
+        ultraWideToggle.isEnabled = hasUltraWideCamera
+        
+        // Add explanation label
+        let ultraWideExplanationLabel = UILabel()
+        ultraWideExplanationLabel.translatesAutoresizingMaskIntoConstraints = false
+        if hasUltraWideCamera {
+            ultraWideExplanationLabel.text = "Adds a 0.5x button for ultra-wide angle shots"
+        } else {
+            ultraWideExplanationLabel.text = "Your device does not have an ultra-wide lens"
+        }
+        ultraWideExplanationLabel.textColor = .lightGray
+        ultraWideExplanationLabel.font = scaledDynamicFont(forTextStyle: .caption1)
+        ultraWideExplanationLabel.adjustsFontForContentSizeCategory = true
+        ultraWideExplanationLabel.numberOfLines = 0 // Allow multiple lines
+        contentView.addSubview(ultraWideExplanationLabel)
         
         // Close button
         let closeButton = UIButton()
@@ -1173,17 +1332,17 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         
         // Layout constraints
         NSLayoutConstraint.activate([
-            // Advanced settings button - align with capture button
+            // Advanced settings button - align with capture button and BIGGER
             advancedSettingsButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
             advancedSettingsButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            advancedSettingsButton.widthAnchor.constraint(equalToConstant: 40),
-            advancedSettingsButton.heightAnchor.constraint(equalToConstant: 40),
+            advancedSettingsButton.widthAnchor.constraint(equalToConstant: 55), // Even bigger
+            advancedSettingsButton.heightAnchor.constraint(equalToConstant: 55), // Even bigger
             
-            // Settings panel
+            // Settings panel - make taller to fit new controls
             settingsPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -100),
             settingsPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            settingsPanel.widthAnchor.constraint(equalToConstant: 220), // Slightly wider
-            settingsPanel.heightAnchor.constraint(equalToConstant: 180), // Slightly taller
+            settingsPanel.widthAnchor.constraint(equalToConstant: 250), // Wider
+            settingsPanel.heightAnchor.constraint(equalToConstant: 260), // Taller for lens section
             
             // Scroll view fills the panel (except for close button space)
             settingsScrollView.topAnchor.constraint(equalTo: settingsPanel.topAnchor, constant: 40),
@@ -1218,7 +1377,32 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             formatLabel.topAnchor.constraint(equalTo: formatButton.bottomAnchor, constant: 10),
             formatLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
             formatLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
-            formatLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -5),
+            
+            // Separator
+            separator.topAnchor.constraint(equalTo: formatLabel.bottomAnchor, constant: 15),
+            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+            
+            // Lens section title
+            lensSectionLabel.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 15),
+            lensSectionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+            lensSectionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+            
+            // Ultra-wide lens label
+            ultraWideLensLabel.topAnchor.constraint(equalTo: lensSectionLabel.bottomAnchor, constant: 10),
+            ultraWideLensLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+            ultraWideLensLabel.trailingAnchor.constraint(equalTo: ultraWideToggle.leadingAnchor, constant: -10),
+            
+            // Ultra-wide toggle switch
+            ultraWideToggle.centerYAnchor.constraint(equalTo: ultraWideLensLabel.centerYAnchor),
+            ultraWideToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+            
+            // Ultra-wide explanation
+            ultraWideExplanationLabel.topAnchor.constraint(equalTo: ultraWideLensLabel.bottomAnchor, constant: 5),
+            ultraWideExplanationLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+            ultraWideExplanationLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+            ultraWideExplanationLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
             
             // Close button - stays at top right corner
             closeButton.topAnchor.constraint(equalTo: settingsPanel.topAnchor, constant: 10),
@@ -1606,6 +1790,84 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     deinit {
         NotificationCenter.default.removeObserver(self)
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
+    }
+
+    // Add this method to handle the ultra-wide lens toggle
+    @objc private func toggleUltraWideLens(_ toggle: UISwitch) {
+        isUsingUltraWide = toggle.isOn
+        
+        if isUsingUltraWide && hasUltraWideCamera {
+            // Enable/show the 0.5x button
+            addUltraWideButton()
+        } else {
+            // Hide the ultra-wide button
+            if let ultraWideButton = view.viewWithTag(301) as? UIButton {
+                ultraWideButton.isHidden = true
+            }
+            
+            // If we're currently using ultra-wide camera and turning off the toggle,
+            // switch back to the wide angle (1x) camera
+            if videoDeviceInput?.device.deviceType == .builtInUltraWideCamera {
+                switchToWideAngle()
+            }
+        }
+        
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+    }
+
+    // Add this method to set up the ultra-wide camera button
+    private func addUltraWideButton() {
+        // Check if button already exists (by tag)
+        if let ultraWideButton = view.viewWithTag(301) as? UIButton {
+            ultraWideButton.isHidden = false
+            return
+        }
+        
+        // Create a new button for ultra-wide camera
+        let ultraWideButton = UIButton()
+        ultraWideButton.tag = 301 // Tag for identification
+        ultraWideButton.translatesAutoresizingMaskIntoConstraints = false
+        ultraWideButton.setTitle("0.5x", for: .normal)
+        ultraWideButton.titleLabel?.font = scaledDynamicFont(forTextStyle: .body)
+        ultraWideButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        ultraWideButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        ultraWideButton.layer.cornerRadius = 25
+        ultraWideButton.addTarget(self, action: #selector(switchToUltraWide), for: .touchUpInside)
+        ultraWideButton.alpha = 0.4 // Dimmed initially
+        
+        // Find our button stack if it exists
+        if let buttonStack = view.subviews.first(where: { $0 is UIStackView && $0.subviews.contains(wideAngleButton) }) as? UIStackView {
+            // Add the ultra-wide button at the beginning of the stack
+            buttonStack.insertArrangedSubview(ultraWideButton, at: 0)
+            
+            // Set size constraints
+            NSLayoutConstraint.activate([
+                ultraWideButton.widthAnchor.constraint(equalToConstant: 50),
+                ultraWideButton.heightAnchor.constraint(equalToConstant: 50)
+            ])
+        } else {
+            // Fallback if stack view not found (shouldn't happen)
+            view.addSubview(ultraWideButton)
+            NSLayoutConstraint.activate([
+                ultraWideButton.centerYAnchor.constraint(equalTo: wideAngleButton.centerYAnchor),
+                ultraWideButton.trailingAnchor.constraint(equalTo: wideAngleButton.leadingAnchor, constant: -10),
+                ultraWideButton.widthAnchor.constraint(equalToConstant: 50),
+                ultraWideButton.heightAnchor.constraint(equalToConstant: 50)
+            ])
+        }
+        
+        // Apply current rotation if needed
+        if currentOrientation.isLandscape {
+            var rotationAngle: CGFloat = 0
+            switch currentOrientation {
+            case .landscapeLeft: rotationAngle = CGFloat.pi / 2
+            case .landscapeRight: rotationAngle = -CGFloat.pi / 2
+            default: break
+            }
+            ultraWideButton.transform = CGAffineTransform(rotationAngle: rotationAngle)
+        }
     }
 }
 
